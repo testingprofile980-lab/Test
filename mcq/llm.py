@@ -7,7 +7,8 @@ import threading
 import time
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,9 +20,16 @@ _MIN_INTERVAL = float(os.getenv("GEMINI_MIN_INTERVAL", "4.1"))
 
 _last_call = 0.0
 _throttle_lock = threading.Lock()
+_client: genai.Client | None = None
 
-if _API_KEY:
-    genai.configure(api_key=_API_KEY)
+
+def _build_client() -> None:
+    global _client
+    if _API_KEY:
+        _client = genai.Client(api_key=_API_KEY)
+
+
+_build_client()
 
 
 def configure_key(api_key: str) -> None:
@@ -32,7 +40,7 @@ def configure_key(api_key: str) -> None:
         return
     _API_KEY = api_key
     os.environ["GEMINI_API_KEY"] = api_key
-    genai.configure(api_key=api_key)
+    _build_client()
 
 
 def configure_model(model_name: str) -> None:
@@ -42,7 +50,7 @@ def configure_model(model_name: str) -> None:
 
 
 def has_key() -> bool:
-    return bool(_API_KEY)
+    return _client is not None
 
 
 def _throttle() -> None:
@@ -58,13 +66,18 @@ class LLMError(Exception):
     pass
 
 
-def _model(temperature: float = 0.7, json_mode: bool = False) -> genai.GenerativeModel:
-    if not _API_KEY:
-        raise LLMError("GEMINI_API_KEY not set. Copy .env.example to .env and add your key.")
-    config: dict[str, Any] = {"temperature": temperature}
+def _generate(prompt: str, temperature: float, json_mode: bool) -> str:
+    if _client is None:
+        raise LLMError("GEMINI_API_KEY not set.")
+    config_kwargs: dict[str, Any] = {"temperature": temperature}
     if json_mode:
-        config["response_mime_type"] = "application/json"
-    return genai.GenerativeModel(_MODEL_NAME, generation_config=config)
+        config_kwargs["response_mime_type"] = "application/json"
+    resp = _client.models.generate_content(
+        model=_MODEL_NAME,
+        contents=prompt,
+        config=types.GenerateContentConfig(**config_kwargs),
+    )
+    return resp.text or ""
 
 
 def generate_text(prompt: str, temperature: float = 0.7, retries: int = 3) -> str:
@@ -72,8 +85,7 @@ def generate_text(prompt: str, temperature: float = 0.7, retries: int = 3) -> st
     for attempt in range(retries):
         try:
             _throttle()
-            resp = _model(temperature).generate_content(prompt)
-            return resp.text or ""
+            return _generate(prompt, temperature, json_mode=False)
         except Exception as e:
             last_err = e
             time.sleep(2 ** attempt)
@@ -85,8 +97,7 @@ def generate_json(prompt: str, temperature: float = 0.4, retries: int = 3) -> An
     for attempt in range(retries):
         try:
             _throttle()
-            resp = _model(temperature, json_mode=True).generate_content(prompt)
-            text = (resp.text or "").strip()
+            text = _generate(prompt, temperature, json_mode=True).strip()
             return json.loads(text)
         except json.JSONDecodeError as e:
             last_err = e
