@@ -26,18 +26,40 @@ item-writer works:
    ban, an independent Bloom auditor, and a solver LLM that takes the test
    (if it picks a distractor with high confidence, the item is rewritten).
 
-## Setup
+## Run locally
 
 ```bash
-cd mcq
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-# Edit .env and add your GEMINI_API_KEY (free at https://aistudio.google.com/apikey)
-streamlit run app.py
+streamlit run streamlit_app.py
 ```
 
-Then open http://localhost:8501.
+Then open http://localhost:8501 and paste your Gemini key in the sidebar
+(free at https://aistudio.google.com/apikey). Or set it in `.env` to skip
+the paste step.
+
+## Deploy free on Streamlit Community Cloud
+
+1. Push this repo to GitHub (public, or private with Streamlit Cloud's
+   GitHub integration).
+2. Go to https://share.streamlit.io → **New app**.
+3. Select your repo and branch.
+4. **Main file path:** `streamlit_app.py` (the shim at repo root — it
+   makes the `mcq` package importable, then loads the app).
+5. **Python version:** 3.11 (under Advanced settings).
+6. Click **Deploy**.
+
+You do **not** need to put the API key in Streamlit secrets — the sidebar
+has a password field where any visitor can paste their own free Gemini
+key. Each session's key stays in that browser session only.
+
+If you'd rather pre-fill a single shared key (your own quota), add it
+under app **Settings → Secrets** as:
+```toml
+GEMINI_API_KEY = "your_key_here"
+```
+The app reads `os.environ["GEMINI_API_KEY"]` first, so this populates
+the sidebar input automatically.
 
 ## Output fields
 

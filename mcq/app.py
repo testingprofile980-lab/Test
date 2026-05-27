@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from mcq import bloom
+from mcq import bloom, llm
 from mcq.pdf_parser import parse_pdf
 from mcq.pipeline import build_mcq, extract_concepts
 
@@ -38,16 +38,35 @@ DEFAULT_DISTRIBUTION = {
 }
 
 with st.sidebar:
-    st.header("Setup")
-    if os.getenv("GEMINI_API_KEY"):
-        st.success("GEMINI_API_KEY loaded from .env")
+    st.header("Gemini API key")
+    st.caption(
+        "Get a free key at [aistudio.google.com/apikey]"
+        "(https://aistudio.google.com/apikey). Stored only for this browser session."
+    )
+
+    env_key = os.getenv("GEMINI_API_KEY", "")
+    session_key = st.session_state.get("gemini_key", env_key)
+    key_input = st.text_input(
+        "GEMINI_API_KEY", value=session_key, type="password",
+        placeholder="paste your key here",
+    )
+    if key_input and key_input != st.session_state.get("gemini_key"):
+        st.session_state["gemini_key"] = key_input
+        llm.configure_key(key_input)
+    elif env_key and not llm.has_key():
+        llm.configure_key(env_key)
+
+    model_choice = st.selectbox(
+        "Model",
+        ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"],
+        index=0,
+    )
+    llm.configure_model(model_choice)
+
+    if llm.has_key():
+        st.success("Key set — ready to generate.")
     else:
-        manual = st.text_input("Paste GEMINI_API_KEY", type="password")
-        if manual:
-            os.environ["GEMINI_API_KEY"] = manual
-            import google.generativeai as genai
-            genai.configure(api_key=manual)
-            st.success("Key set for this session.")
+        st.warning("Paste a key above to enable generation.")
 
     st.divider()
     st.header("Bloom distribution")
@@ -107,7 +126,9 @@ if uploaded:
             "Reduce the distribution or split the PDF."
         )
 
-    if total_target == 0:
+    if not llm.has_key():
+        st.error("Add your Gemini API key in the sidebar first.")
+    elif total_target == 0:
         st.info("Set at least one Bloom level to a non-zero count to enable generation.")
     elif st.button("Generate MCQs", type="primary"):
         all_rows: list[dict] = []

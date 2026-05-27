@@ -24,6 +24,27 @@ if _API_KEY:
     genai.configure(api_key=_API_KEY)
 
 
+def configure_key(api_key: str) -> None:
+    """Set the Gemini API key at runtime (called by the UI)."""
+    global _API_KEY
+    api_key = (api_key or "").strip()
+    if not api_key:
+        return
+    _API_KEY = api_key
+    os.environ["GEMINI_API_KEY"] = api_key
+    genai.configure(api_key=api_key)
+
+
+def configure_model(model_name: str) -> None:
+    global _MODEL_NAME
+    if model_name:
+        _MODEL_NAME = model_name
+
+
+def has_key() -> bool:
+    return bool(_API_KEY)
+
+
 def _throttle() -> None:
     global _last_call
     with _throttle_lock:
