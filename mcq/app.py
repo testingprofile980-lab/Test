@@ -1,13 +1,22 @@
 """Streamlit UI for the MCQ generator.
 
-Run with: streamlit run mcq/app.py
+Run with: streamlit run mcq/app.py  (from repo root)
+       or: streamlit run streamlit_app.py
 """
 from __future__ import annotations
 
 import json
 import os
+import pathlib
 import random
+import sys
 from itertools import cycle
+
+# Make the `mcq` package importable when Streamlit Cloud is pointed
+# directly at this file (it only adds this file's directory to sys.path).
+_REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 import pandas as pd
 import streamlit as st
