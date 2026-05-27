@@ -113,21 +113,32 @@ if uploaded:
     chunks_preview = parse_pdf(pdf_bytes, target_chars=chunk_chars)
     chunks_to_use = chunks_preview if process_all_chunks else chunks_preview[:max_chunks]
 
+    total_chars = sum(len(c.text) for c in chunks_to_use)
+
     # Cost / time estimate
     calls_for_extraction = len(chunks_to_use)
-    calls_per_mcq = (1 + (2 if run_solver_gate else 1)) * 1  # draft + (bloom + solver)
-    if run_solver_gate:
-        calls_per_mcq = 3
-    else:
-        calls_per_mcq = 2
+    calls_per_mcq = 3 if run_solver_gate else 2
     est_calls = calls_for_extraction + total_target * calls_per_mcq
-    # Free tier is 15 RPM -> ~4.1s/call
     est_minutes = est_calls * 4.1 / 60.0
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Chunks", len(chunks_to_use))
-    c2.metric("Est. API calls", est_calls)
-    c3.metric("Est. time", f"{est_minutes:.1f} min")
+    c2.metric("Total chars", f"{total_chars:,}")
+    c3.metric("Est. API calls", est_calls)
+    c4.metric("Est. time", f"{est_minutes:.1f} min")
+
+    if total_chars < 200:
+        st.error(
+            "Almost no text extracted from this PDF. It's likely a scanned PDF "
+            "(images of pages, not selectable text). Run it through an OCR tool "
+            "first (e.g. `ocrmypdf input.pdf output.pdf`) and re-upload."
+        )
+
+    with st.expander("Preview extracted text (first chunk)"):
+        if chunks_to_use:
+            st.text(chunks_to_use[0].text[:2000] + ("…" if len(chunks_to_use[0].text) > 2000 else ""))
+        else:
+            st.write("(no chunks)")
 
     if est_calls > 1500:
         st.warning(
@@ -146,19 +157,37 @@ if uploaded:
         status = st.empty()
 
         # ---- Phase 1: extract concepts from every chunk ----
-        all_concepts: list[tuple] = []  # list of (Concept, Chunk)
+        all_concepts: list[tuple] = []
         for i, chunk in enumerate(chunks_to_use, start=1):
-            status.write(f"Extracting concepts… chunk {i}/{len(chunks_to_use)} (pages {chunk.page_start}–{chunk.page_end})")
+            status.write(
+                f"Extracting concepts… chunk {i}/{len(chunks_to_use)} "
+                f"(pages {chunk.page_start}–{chunk.page_end}, {len(chunk.text)} chars)"
+            )
             try:
                 concepts = extract_concepts(chunk.text, max_concepts=max_concepts_per_chunk)
+                if not concepts:
+                    all_failures.append({
+                        "phase": "concept_extraction", "chunk": i,
+                        "issue": "model returned 0 concepts (chunk may be boilerplate)",
+                        "preview": chunk.text[:200],
+                    })
                 for c in concepts:
                     all_concepts.append((c, chunk))
             except Exception as e:
-                all_failures.append({"phase": "concept_extraction", "chunk": i, "error": str(e)})
+                all_failures.append({
+                    "phase": "concept_extraction", "chunk": i,
+                    "error": f"{type(e).__name__}: {e}",
+                    "preview": chunk.text[:200],
+                })
             progress.progress(i / max(est_calls, 1))
 
         if not all_concepts:
-            st.error("No concepts could be extracted from the PDF.")
+            st.error(
+                f"No concepts could be extracted from {len(chunks_to_use)} chunk(s). "
+                "See diagnostics below."
+            )
+            with st.expander("Concept extraction failures", expanded=True):
+                st.json(all_failures or [{"info": "all chunks returned 0 concepts with no error"}])
             st.stop()
 
         status.write(f"Extracted **{len(all_concepts)}** concepts. Generating MCQs…")

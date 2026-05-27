@@ -52,16 +52,24 @@ class MCQ:
 _CONCEPT_PROMPT = """You are an expert curriculum designer. Read the passage and extract the
 teachable CONCEPTS — not facts, not trivia, but ideas a student must understand.
 
-For each concept, return:
-  - name: 2-6 word noun phrase
-  - definition: one-sentence definition grounded in the passage
-  - key_relationships: list of 1-3 short phrases describing how this concept connects
-    to other concepts (cause, contrast, composition, prerequisite, etc.)
-  - worked_example: a concrete example from the passage (or "" if none)
+Return STRICT JSON in EXACTLY this shape:
+{{
+  "concepts": [
+    {{
+      "name": "2-6 word noun phrase",
+      "definition": "one-sentence definition grounded in the passage",
+      "key_relationships": ["short phrase", "short phrase"],
+      "worked_example": "concrete example from the passage, or empty string"
+    }}
+  ]
+}}
 
-Return STRICT JSON: a list of objects with those keys. Max {max_concepts} concepts.
-Skip definitions that are too narrow (a single date, a single name) — focus on ideas
-that support higher-order reasoning.
+Rules:
+- Maximum {max_concepts} concepts.
+- Skip definitions that are too narrow (a single date, a single name).
+- Focus on ideas that support higher-order reasoning.
+- If the passage has no extractable concepts (it's a table of contents,
+  copyright page, references, etc.), return {{"concepts": []}}.
 
 PASSAGE:
 \"\"\"
@@ -70,21 +78,45 @@ PASSAGE:
 """
 
 
+def _coerce_concept_list(raw: Any) -> list[dict]:
+    """Be liberal in what we accept: the model sometimes returns a bare list,
+    sometimes wraps it in {concepts:[...]}, sometimes uses a different key."""
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    if isinstance(raw, dict):
+        for key in ("concepts", "Concepts", "items", "data", "result", "output"):
+            v = raw.get(key)
+            if isinstance(v, list):
+                return [x for x in v if isinstance(x, dict)]
+        for v in raw.values():
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                return [x for x in v if isinstance(x, dict)]
+        if "name" in raw and "definition" in raw:
+            return [raw]
+    return []
+
+
 def extract_concepts(passage: str, max_concepts: int = 6) -> list[Concept]:
+    if not passage or len(passage.strip()) < 80:
+        return []
     prompt = _CONCEPT_PROMPT.format(passage=passage, max_concepts=max_concepts)
     raw = generate_json(prompt, temperature=0.3)
-    items = raw if isinstance(raw, list) else raw.get("concepts", [])
+    items = _coerce_concept_list(raw)
     out: list[Concept] = []
     for item in items[:max_concepts]:
-        try:
-            out.append(Concept(
-                name=item["name"].strip(),
-                definition=item["definition"].strip(),
-                key_relationships=[s.strip() for s in item.get("key_relationships", []) if s.strip()],
-                worked_example=item.get("worked_example", "").strip(),
-            ))
-        except (KeyError, AttributeError):
+        name = (item.get("name") or "").strip()
+        definition = (item.get("definition") or "").strip()
+        if not name or not definition:
             continue
+        rels = item.get("key_relationships") or item.get("relationships") or []
+        if isinstance(rels, str):
+            rels = [rels]
+        out.append(Concept(
+            name=name,
+            definition=definition,
+            key_relationships=[str(s).strip() for s in rels if str(s).strip()],
+            worked_example=(item.get("worked_example") or item.get("example") or "").strip(),
+        ))
     return out
 
 
