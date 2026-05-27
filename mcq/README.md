@@ -55,10 +55,24 @@ Every MCQ contains:
 
 Exports: CSV (flat) or JSON (with misconception metadata).
 
-## Cost
+## Controls
 
-Gemini 2.0 Flash free tier: 1,500 requests/day. One MCQ uses ~3 calls
-(draft + Bloom judge + solver), so ~500 MCQs/day for free.
+- **Bloom distribution** — set a per-level count (0–50). 0 skips that level.
+  Default biases toward HOTS: 0 Remember / 2 Understand / 8 Apply / 6 Analyze /
+  3 Evaluate / 1 Create.
+- **Process entire PDF** — on by default. Turn off to cap chunks for testing.
+- **Solver validation** — second LLM takes the test; if it picks a distractor
+  confidently, the item is regenerated. Slower, sharper questions.
+
+## Cost & rate limits
+
+Gemini 2.0 Flash free tier: **15 requests/min, 1,500/day**. The pipeline
+auto-throttles to stay under 15 RPM (4.1s between calls). One MCQ uses ~3
+calls (draft + Bloom judge + solver) plus 1 call per chunk for concepts.
+
+For a 65-page PDF generating 20 MCQs: roughly **6 minutes**, ~90 calls —
+well within the daily limit. The UI shows live estimates before you click
+Generate.
 
 ## Layout
 
