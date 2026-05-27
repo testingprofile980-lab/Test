@@ -1,14 +1,17 @@
 """Streamlit Cloud entry point.
 
-Streamlit Cloud runs the file you specify in its "Main file path" setting.
-This shim makes the `mcq` package importable, then runs the app module —
-its top-level `st.*` calls render the page as a side effect.
+Streamlit reruns the main script on every interaction. We use runpy so
+mcq/app.py executes fresh each time (a plain `import` would be cached
+and the page would go blank on rerun).
 
 Locally you can still run `streamlit run mcq/app.py` if you prefer.
 """
 import pathlib
+import runpy
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+_ROOT = pathlib.Path(__file__).resolve().parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
-from mcq import app  # noqa: F401  (side-effect: builds the Streamlit page)
+runpy.run_path(str(_ROOT / "mcq" / "app.py"), run_name="__main__")
