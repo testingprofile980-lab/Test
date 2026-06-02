@@ -23,7 +23,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from mcq import bloom, llm
-from mcq.pdf_parser import parse_pdf
+from mcq.pdf_parser import page_diagnostics, parse_pdf
 from mcq.pipeline import build_mcq, extract_concepts
 
 load_dotenv()
@@ -110,33 +110,47 @@ uploaded = st.file_uploader("Content PDF", type=["pdf"])
 
 if uploaded:
     pdf_bytes = uploaded.read()
+    diag = page_diagnostics(pdf_bytes)
     chunks_preview = parse_pdf(pdf_bytes, target_chars=chunk_chars)
     chunks_to_use = chunks_preview if process_all_chunks else chunks_preview[:max_chunks]
 
     total_chars = sum(len(c.text) for c in chunks_to_use)
 
-    # Cost / time estimate
     calls_for_extraction = len(chunks_to_use)
     calls_per_mcq = 3 if run_solver_gate else 2
     est_calls = calls_for_extraction + total_target * calls_per_mcq
     est_minutes = est_calls * 4.1 / 60.0
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Chunks", len(chunks_to_use))
-    c2.metric("Total chars", f"{total_chars:,}")
-    c3.metric("Est. API calls", est_calls)
-    c4.metric("Est. time", f"{est_minutes:.1f} min")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Pages", diag["page_count"])
+    c2.metric("Chunks", len(chunks_to_use))
+    c3.metric("Total chars", f"{total_chars:,}")
+    c4.metric("Est. API calls", est_calls)
+    c5.metric("Est. time", f"{est_minutes:.1f} min")
 
+    # Heuristics that hint at unreadable PDFs
     if total_chars < 200:
         st.error(
-            "Almost no text extracted from this PDF. It's likely a scanned PDF "
-            "(images of pages, not selectable text). Run it through an OCR tool "
-            "first (e.g. `ocrmypdf input.pdf output.pdf`) and re-upload."
+            "Almost no text extracted. This PDF is likely scanned (page images, "
+            "not selectable text). Run it through OCR first "
+            "(e.g. `ocrmypdf input.pdf output.pdf`) and re-upload."
+        )
+    elif diag["empty_pages"] > diag["page_count"] // 2:
+        st.warning(
+            f"{diag['empty_pages']} of {diag['page_count']} pages have almost no "
+            "text — they may be image-only slides. The text content is still "
+            "usable; image-only pages will just be skipped."
+        )
+    elif diag["median_chars"] < 60:
+        st.info(
+            "Most pages have very little text (slide-deck pattern). "
+            "Chunking groups multiple slides per chunk automatically."
         )
 
     with st.expander("Preview extracted text (first chunk)"):
         if chunks_to_use:
-            st.text(chunks_to_use[0].text[:2000] + ("…" if len(chunks_to_use[0].text) > 2000 else ""))
+            preview = chunks_to_use[0].text
+            st.text(preview[:2000] + ("…" if len(preview) > 2000 else ""))
         else:
             st.write("(no chunks)")
 
